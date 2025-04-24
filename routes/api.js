@@ -125,6 +125,9 @@ module.exports = function (app) {
   app.post('/api/solve', (req, res) => {
     const { puzzle } = req.body;
     if (!puzzle) return res.json({ error: 'Required field missing' });
+    // Validação ANTES de tentar resolver
+    if (/[^1-9.]/.test(puzzle)) return res.json({ error: 'Invalid characters in puzzle' });
+    if (puzzle.length !== 81) return res.json({ error: 'Expected puzzle to be 81 characters long' });
     const result = solver.solve(puzzle);
     if (result.error) return res.json(result);
     res.json({ solution: result.solution });
@@ -135,8 +138,8 @@ module.exports = function (app) {
     const { puzzle, coordinate, value } = req.body;
     if (!puzzle || !coordinate || !value) return res.json({ error: 'Required field(s) missing' });
     // Validação básica do puzzle
-    const valid = solver.validate(puzzle);
-    if (valid !== true) return res.json(valid);
+    if (/[^1-9.]/.test(puzzle)) return res.json({ error: 'Invalid characters in puzzle' });
+    if (puzzle.length !== 81) return res.json({ error: 'Expected puzzle to be 81 characters long' });
     // Validação do valor
     if (!/^[1-9]$/.test(value)) return res.json({ error: 'Invalid value' });
     // Validação do coordinate
@@ -144,9 +147,14 @@ module.exports = function (app) {
     const row = coordinate[0].toUpperCase().charCodeAt(0) - 65;
     const col = parseInt(coordinate[1], 10) - 1;
     if (row < 0 || row > 8 || col < 0 || col > 8) return res.json({ error: 'Invalid coordinate' });
-    // Se já está preenchido com o mesmo valor, é válido
+    // Se já está preenchido com o mesmo valor, e não conflita, é válido
     const grid = solver.stringToGrid(puzzle);
-    if (grid[row][col] === value) return res.json({ valid: true });
+    if (grid[row][col] === value) {
+      // Checa se há conflito real
+      const conflicts = solver.checkPlacement(puzzle, row, col, value);
+      if (conflicts.length === 0) return res.json({ valid: true });
+      else return res.json({ valid: false, conflict: conflicts });
+    }
     // Checagem de conflitos
     const conflicts = solver.checkPlacement(puzzle, row, col, value);
     if (conflicts.length === 0) return res.json({ valid: true });

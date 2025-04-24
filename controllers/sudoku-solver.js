@@ -49,8 +49,9 @@ class SudokuSolver {
 
   // Resolve o puzzle usando backtracking
   solve(puzzleString) {
-    const valid = this.validate(puzzleString);
-    if (valid !== true) return valid;
+    if (!puzzleString) return { error: 'Required field missing' };
+    if (/[^1-9.]/.test(puzzleString)) return { error: 'Invalid characters in puzzle' };
+    if (puzzleString.length !== 81) return { error: 'Expected puzzle to be 81 characters long' };
     let grid = this.stringToGrid(puzzleString);
     if (this._solveGrid(grid)) {
       return { solution: grid.flat().join('') };
