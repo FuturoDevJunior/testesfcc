@@ -2,6 +2,8 @@ const chaiHttp = require('chai-http');
 const chai = require('chai');
 let assert = chai.assert;
 const server = require('../server');
+const SudokuSolver = require('../controllers/sudoku-solver.js');
+const puzzles = require('../controllers/puzzle-strings.js');
 
 chai.use(chaiHttp);
 
@@ -64,4 +66,54 @@ suite('Functional Tests', function() {
         done();
       });
   });
+});
+
+describe('Sudoku Solver Functional Tests', function() {
+  it('Solve a puzzle with valid puzzle string: POST request to /api/solve', function(done) {
+    chai.request(server)
+      .post('/api/solve')
+      .send({ puzzle: puzzles[0] })
+      .end((err, res) => {
+        assert.equal(res.status, 200);
+        assert.property(res.body, 'solution');
+        done();
+      });
+  });
+  it('Solve a puzzle with missing puzzle string: POST request to /api/solve', function(done) {
+    chai.request(server)
+      .post('/api/solve')
+      .send({})
+      .end((err, res) => {
+        assert.deepEqual(res.body, { error: 'Required field missing' });
+        done();
+      });
+  });
+  it('Solve a puzzle with invalid characters: POST request to /api/solve', function(done) {
+    chai.request(server)
+      .post('/api/solve')
+      .send({ puzzle: puzzles[1] })
+      .end((err, res) => {
+        assert.deepEqual(res.body, { error: 'Invalid characters in puzzle' });
+        done();
+      });
+  });
+  it('Solve a puzzle with incorrect length: POST request to /api/solve', function(done) {
+    chai.request(server)
+      .post('/api/solve')
+      .send({ puzzle: puzzles[2] })
+      .end((err, res) => {
+        assert.deepEqual(res.body, { error: 'Expected puzzle to be 81 characters long' });
+        done();
+      });
+  });
+  it('Solve a puzzle that cannot be solved: POST request to /api/solve', function(done) {
+    chai.request(server)
+      .post('/api/solve')
+      .send({ puzzle: puzzles[3] })
+      .end((err, res) => {
+        assert.deepEqual(res.body, { error: 'Puzzle cannot be solved' });
+        done();
+      });
+  });
+  // Testes para /api/check podem ser adicionados aqui seguindo o mesmo padrão
 });

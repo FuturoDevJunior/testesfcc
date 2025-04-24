@@ -4,6 +4,7 @@ const expect = require('chai').expect;
 const ConvertHandler = require('../controllers/convertHandler.js');
 const { randomUUID } = require('crypto');
 const mongoose = require('mongoose');
+const SudokuSolver = require('../controllers/sudoku-solver.js');
 
 // In-memory store for issues by project
 const issuesDB = {};
@@ -24,6 +25,7 @@ mongoose.connect(process.env.DB, { useNewUrlParser: true, useUnifiedTopology: tr
 module.exports = function (app) {
   
   let convertHandler = new ConvertHandler();
+  const solver = new SudokuSolver();
 
   app.get('/api/convert', (req, res) => {
     const input = req.query.input;
@@ -117,6 +119,38 @@ module.exports = function (app) {
     } catch {
       res.status(500).send('error deleting books');
     }
+  });
+
+  // POST /api/solve
+  app.post('/api/solve', (req, res) => {
+    const { puzzle } = req.body;
+    if (!puzzle) return res.json({ error: 'Required field missing' });
+    const result = solver.solve(puzzle);
+    if (result.error) return res.json(result);
+    res.json({ solution: result.solution });
+  });
+
+  // POST /api/check
+  app.post('/api/check', (req, res) => {
+    const { puzzle, coordinate, value } = req.body;
+    if (!puzzle || !coordinate || !value) return res.json({ error: 'Required field(s) missing' });
+    // Validação básica do puzzle
+    const valid = solver.validate(puzzle);
+    if (valid !== true) return res.json(valid);
+    // Validação do valor
+    if (!/^[1-9]$/.test(value)) return res.json({ error: 'Invalid value' });
+    // Validação do coordinate
+    if (!/^[A-I][1-9]$/.test(coordinate)) return res.json({ error: 'Invalid coordinate' });
+    const row = coordinate[0].toUpperCase().charCodeAt(0) - 65;
+    const col = parseInt(coordinate[1], 10) - 1;
+    if (row < 0 || row > 8 || col < 0 || col > 8) return res.json({ error: 'Invalid coordinate' });
+    // Se já está preenchido com o mesmo valor, é válido
+    const grid = solver.stringToGrid(puzzle);
+    if (grid[row][col] === value) return res.json({ valid: true });
+    // Checagem de conflitos
+    const conflicts = solver.checkPlacement(puzzle, row, col, value);
+    if (conflicts.length === 0) return res.json({ valid: true });
+    res.json({ valid: false, conflict: conflicts });
   });
 
 };

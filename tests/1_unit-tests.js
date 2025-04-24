@@ -1,8 +1,11 @@
 const chai = require('chai');
 let assert = chai.assert;
 const ConvertHandler = require('../controllers/convertHandler.js');
+const SudokuSolver = require('../controllers/sudoku-solver.js');
+const puzzles = require('../controllers/puzzle-strings.js');
 
 let convertHandler = new ConvertHandler();
+const solver = new SudokuSolver();
 
 suite('Unit Tests', function(){
   test('convertHandler should correctly read a whole number input', function() {
@@ -65,5 +68,54 @@ suite('Unit Tests', function(){
   });
   test('convertHandler should correctly convert kg to lbs', function() {
     assert.approximately(convertHandler.convert(1, 'kg'), 2.20462, 0.00001);
+  });
+});
+
+describe('Sudoku Solver Unit Tests', function() {
+  it('Logic handles a valid puzzle string of 81 characters', function() {
+    assert.strictEqual(solver.validate(puzzles[0]), true);
+  });
+  it('Logic handles a puzzle string with invalid characters (not 1-9 or .)', function() {
+    assert.deepEqual(solver.validate(puzzles[1]), { error: 'Invalid characters in puzzle' });
+  });
+  it('Logic handles a puzzle string that is not 81 characters in length', function() {
+    assert.deepEqual(solver.validate(puzzles[2]), { error: 'Expected puzzle to be 81 characters long' });
+  });
+  it('Logic handles a valid row placement', function() {
+    const grid = solver.stringToGrid(puzzles[0]);
+    assert.isTrue(solver.checkRowPlacement(grid, 0, '3'));
+  });
+  it('Logic handles an invalid row placement', function() {
+    const grid = solver.stringToGrid(puzzles[0]);
+    assert.isFalse(solver.checkRowPlacement(grid, 0, '1'));
+  });
+  it('Logic handles a valid column placement', function() {
+    const grid = solver.stringToGrid(puzzles[0]);
+    assert.isTrue(solver.checkColPlacement(grid, 0, '3'));
+  });
+  it('Logic handles an invalid column placement', function() {
+    const grid = solver.stringToGrid(puzzles[0]);
+    assert.isFalse(solver.checkColPlacement(grid, 0, '1'));
+  });
+  it('Logic handles a valid region (3x3 grid) placement', function() {
+    const grid = solver.stringToGrid(puzzles[0]);
+    assert.isTrue(solver.checkRegionPlacement(grid, 0, 0, '3'));
+  });
+  it('Logic handles an invalid region (3x3 grid) placement', function() {
+    const grid = solver.stringToGrid(puzzles[0]);
+    assert.isFalse(solver.checkRegionPlacement(grid, 0, 0, '1'));
+  });
+  it('Valid puzzle strings pass the solver', function() {
+    const result = solver.solve(puzzles[0]);
+    assert.property(result, 'solution');
+    assert.lengthOf(result.solution, 81);
+  });
+  it('Invalid puzzle strings fail the solver', function() {
+    const result = solver.solve(puzzles[3]);
+    assert.deepEqual(result, { error: 'Puzzle cannot be solved' });
+  });
+  it('Solver returns the expected solution for an incomplete puzzle', function() {
+    const result = solver.solve(puzzles[0]);
+    assert.equal(result.solution, '135762984946381257728459613694517832812936745357824196589273461471698325263145879');
   });
 });
