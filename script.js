@@ -1,209 +1,371 @@
-// script.js
-// P2P Video Chat App (freeCodeCamp)
-// Estrutura base: controle de etapas, mídia, sinalização, WebRTC, UX
+// URLs dos dados
+const WORLD_URL = 'https://unpkg.com/world-atlas@2.0.2/countries-110m.json';
+const METEORITE_URL = 'https://raw.githubusercontent.com/freeCodeCamp/ProjectReferenceData/master/meteorite-strike-data.json';
 
-// --- Seletores de elementos ---
-const permissionStep = document.getElementById('permission-step');
-const roomStep = document.getElementById('room-step');
-const chatStep = document.getElementById('chat-step');
-const grantMediaBtn = document.getElementById('grant-media-btn');
-const permissionError = document.getElementById('permission-error');
-const roomInput = document.getElementById('room-input');
-const joinRoomBtn = document.getElementById('join-room-btn');
-const cancelRoomBtn = document.getElementById('cancel-room-btn');
-const roomError = document.getElementById('room-error');
-const localVideo = document.getElementById('local-video');
-const remoteVideo = document.getElementById('remote-video');
-const chatStatus = document.getElementById('chat-status');
-const leaveBtn = document.getElementById('leave-btn');
+const mapContainer = document.getElementById('map');
+const width = mapContainer.offsetWidth;
+const height = mapContainer.offsetHeight;
 
-// --- Estado global ---
-let localStream = null;
-let remoteStream = null;
-let ws = null;
-let peer = null;
-let currentRoom = null;
-let isInitiator = false;
-let reconnectTimeout = null;
+// Cria SVG
+const svg = d3.select('#map')
+  .append('svg')
+  .attr('width', width)
+  .attr('height', height);
 
-// --- Funções utilitárias ---
-function showStep(step) {
-  [permissionStep, roomStep, chatStep].forEach(s => s.classList.remove('active'));
-  step.classList.add('active');
+const tooltip = d3.select('#tooltip');
+
+// Projeção e path
+const projection = d3.geoNaturalEarth1()
+  .scale(width / 6.5)
+  .translate([width / 2, height / 2]);
+const path = d3.geoPath().projection(projection);
+
+Promise.all([
+  d3.json(WORLD_URL),
+  d3.json(METEORITE_URL)
+]).then(([world, meteorites]) => {
+  drawMap(world);
+  drawMeteorites(meteorites.features);
+});
+
+function drawMap(world) {
+  const countries = topojson.feature(world, world.objects.countries).features;
+  svg.append('g')
+    .selectAll('path')
+    .data(countries)
+    .enter().append('path')
+    .attr('class', 'land')
+    .attr('d', path);
 }
 
-function showError(elem, msg) {
-  elem.textContent = msg;
-  elem.style.display = msg ? 'block' : 'none';
+function drawMeteorites(data) {
+  // Filtra meteoritos com coordenadas válidas
+  const meteorites = data.filter(d => d.geometry && d.geometry.coordinates);
+
+  // Escala de tamanho (raio do círculo)
+  const massExtent = d3.extent(meteorites, d => +d.properties.mass || 1);
+  const radius = d3.scaleSqrt()
+    .domain(massExtent)
+    .range([2, 30]);
+
+  svg.append('g')
+    .selectAll('circle')
+    .data(meteorites)
+    .enter().append('circle')
+    .attr('class', 'meteorite')
+    .attr('cx', d => projection(d.geometry.coordinates)[0])
+    .attr('cy', d => projection(d.geometry.coordinates)[1])
+    .attr('r', d => radius(+d.properties.mass || 1))
+    .on('mouseover', function(event, d) {
+      d3.select(this).attr('stroke', '#222').attr('opacity', 1);
+      tooltip.transition().duration(120).style('opacity', 1);
+      tooltip.html(getTooltipContent(d))
+        .style('left', (event.pageX + 18) + 'px')
+        .style('top', (event.pageY - 24) + 'px');
+    })
+    .on('mousemove', function(event) {
+      tooltip.style('left', (event.pageX + 18) + 'px')
+             .style('top', (event.pageY - 24) + 'px');
+    })
+    .on('mouseout', function() {
+      d3.select(this).attr('stroke', '#fff').attr('opacity', 0.85);
+      tooltip.transition().duration(180).style('opacity', 0);
+    });
 }
 
-function clearError(elem) {
-  showError(elem, '');
+function getTooltipContent(d) {
+  const p = d.properties;
+  return `
+    <strong>${p.name || 'Unknown'}</strong><br>
+    <span><b>Mass:</b> ${p.mass ? (+p.mass).toLocaleString() + ' g' : 'N/A'}</span><br>
+    <span><b>Year:</b> ${p.year ? new Date(p.year).getFullYear() : 'N/A'}</span><br>
+    <span><b>Class:</b> ${p.recclass || 'N/A'}</span><br>
+    <span><b>Fall:</b> ${p.fall || 'N/A'}</span><br>
+    <span><b>Location:</b> [${d.geometry.coordinates[1].toFixed(2)}, ${d.geometry.coordinates[0].toFixed(2)}]</span>
+  `;
 }
 
-function resetApp() {
-  // Limpa estado e volta ao início
-  if (peer) { peer.close(); peer = null; }
-  if (ws) { ws.close(); ws = null; }
-  if (remoteVideo.srcObject) remoteVideo.srcObject = null;
-  chatStatus.textContent = '';
-  currentRoom = null;
-  isInitiator = false;
-  clearError(permissionError);
-  clearError(roomError);
-  showStep(permissionStep);
+// --- Modelos de Dados ---
+
+class User {
+  constructor(username, fullName = '', city = '', state = '') {
+    this.username = username;
+    this.fullName = fullName;
+    this.city = city;
+    this.state = state;
+  }
 }
 
-// --- Inicialização ---
-showStep(permissionStep);
-// (A lógica completa será implementada nas próximas etapas)
+class Book {
+  constructor(id, title, author, owner) {
+    this.id = id;
+    this.title = title;
+    this.author = author;
+    this.owner = owner; // username
+  }
+}
 
-// --- Permissão de mídia ---
-grantMediaBtn.onclick = async () => {
-  clearError(permissionError);
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    localVideo.srcObject = localStream;
-    showStep(roomStep);
-    roomInput.focus();
-  } catch (err) {
-    showError(permissionError, 'Permissão de câmera e microfone é obrigatória.');
+class Trade {
+  constructor(id, bookId, fromUser, toUser, status = 'pending') {
+    this.id = id;
+    this.bookId = bookId;
+    this.fromUser = fromUser;
+    this.toUser = toUser;
+    this.status = status; // pending, accepted, rejected
+  }
+}
+
+// --- Persistência (localStorage) ---
+
+const Storage = {
+  getUsers() {
+    return JSON.parse(localStorage.getItem('btc_users') || '[]');
+  },
+  saveUsers(users) {
+    localStorage.setItem('btc_users', JSON.stringify(users));
+  },
+  getBooks() {
+    return JSON.parse(localStorage.getItem('btc_books') || '[]');
+  },
+  saveBooks(books) {
+    localStorage.setItem('btc_books', JSON.stringify(books));
+  },
+  getTrades() {
+    return JSON.parse(localStorage.getItem('btc_trades') || '[]');
+  },
+  saveTrades(trades) {
+    localStorage.setItem('btc_trades', JSON.stringify(trades));
+  },
+  getCurrentUser() {
+    return localStorage.getItem('btc_current_user');
+  },
+  setCurrentUser(username) {
+    localStorage.setItem('btc_current_user', username);
   }
 };
 
-// --- Prompt de sala ---
-joinRoomBtn.onclick = () => {
-  clearError(roomError);
-  const roomName = (roomInput.value || '').trim();
-  if (!roomName) {
-    showError(roomError, 'Digite um nome de sala válido.');
-    roomInput.focus();
+// --- Utilitários ---
+
+function generateId(prefix) {
+  return prefix + '_' + Math.random().toString(36).substr(2, 9);
+}
+
+// --- Estado Inicial (Mock de Usuário Logado) ---
+
+function ensureInitialUser() {
+  let users = Storage.getUsers();
+  let currentUser = Storage.getCurrentUser();
+  if (!currentUser) {
+    // Cria um usuário padrão
+    const username = 'meu_usuario';
+    users.push(new User(username, 'Seu Nome', 'Sua Cidade', 'Seu Estado'));
+    Storage.saveUsers(users);
+    Storage.setCurrentUser(username);
+  }
+}
+ensureInitialUser();
+
+// --- Renderização e Navegação ---
+
+const sections = {
+  books: document.getElementById('books-section'),
+  addBook: document.getElementById('add-book-section'),
+  profile: document.getElementById('profile-section'),
+  trades: document.getElementById('trades-section')
+};
+
+function showSection(section) {
+  Object.values(sections).forEach(sec => sec.classList.remove('active'));
+  sections[section].classList.add('active');
+}
+
+document.getElementById('view-books-btn').onclick = () => {
+  renderBooks();
+  showSection('books');
+};
+document.getElementById('add-book-btn').onclick = () => {
+  renderAddBookForm();
+  showSection('addBook');
+};
+document.getElementById('profile-btn').onclick = () => {
+  renderProfileForm();
+  showSection('profile');
+};
+document.getElementById('trades-btn').onclick = () => {
+  renderTrades();
+  showSection('trades');
+};
+
+// --- Renderização dos Livros ---
+
+function renderBooks() {
+  const books = Storage.getBooks();
+  const users = Storage.getUsers();
+  const currentUser = Storage.getCurrentUser();
+  let html = `<h2>Todos os Livros</h2><div class="book-list">`;
+  if (books.length === 0) {
+    html += `<p>Nenhum livro cadastrado ainda.</p>`;
+  } else {
+    for (const book of books) {
+      const owner = users.find(u => u.username === book.owner);
+      html += `
+        <div class="book-card">
+          <h3>${book.title}</h3>
+          <div>Autor: <b>${book.author}</b></div>
+          <div class="owner">Dono: ${owner ? owner.fullName : book.owner}</div>
+          ${book.owner !== currentUser ? `<button onclick="proposeTrade('${book.id}')">Propor Troca</button>` : ''}
+        </div>
+      `;
+    }
+  }
+  html += `</div>`;
+  sections.books.innerHTML = html;
+}
+
+// --- Adicionar Livro ---
+
+function renderAddBookForm() {
+  sections.addBook.innerHTML = `
+    <h2>Adicionar Novo Livro</h2>
+    <form id="add-book-form">
+      <label>Título do Livro
+        <input type="text" name="title" required>
+      </label>
+      <label>Autor
+        <input type="text" name="author" required>
+      </label>
+      <button type="submit">Adicionar</button>
+    </form>
+  `;
+  document.getElementById('add-book-form').onsubmit = function(e) {
+    e.preventDefault();
+    const form = e.target;
+    const title = form.title.value.trim();
+    const author = form.author.value.trim();
+    if (!title || !author) return;
+    const books = Storage.getBooks();
+    const currentUser = Storage.getCurrentUser();
+    books.push(new Book(generateId('book'), title, author, currentUser));
+    Storage.saveBooks(books);
+    renderBooks();
+    showSection('books');
+  };
+}
+
+// --- Perfil do Usuário ---
+
+function renderProfileForm() {
+  const users = Storage.getUsers();
+  const currentUser = Storage.getCurrentUser();
+  const user = users.find(u => u.username === currentUser);
+  sections.profile.innerHTML = `
+    <h2>Meu Perfil</h2>
+    <form id="profile-form">
+      <label>Nome Completo
+        <input type="text" name="fullName" value="${user.fullName}" required>
+      </label>
+      <label>Cidade
+        <input type="text" name="city" value="${user.city}" required>
+      </label>
+      <label>Estado
+        <input type="text" name="state" value="${user.state}" required>
+      </label>
+      <button type="submit">Salvar</button>
+    </form>
+  `;
+  document.getElementById('profile-form').onsubmit = function(e) {
+    e.preventDefault();
+    user.fullName = e.target.fullName.value.trim();
+    user.city = e.target.city.value.trim();
+    user.state = e.target.state.value.trim();
+    Storage.saveUsers(users);
+    alert('Perfil atualizado!');
+    renderProfileForm();
+  };
+}
+
+// --- Trocas ---
+
+function renderTrades() {
+  const trades = Storage.getTrades();
+  const books = Storage.getBooks();
+  const users = Storage.getUsers();
+  const currentUser = Storage.getCurrentUser();
+  let html = `<h2>Minhas Trocas</h2><div class="trade-list">`;
+  const myTrades = trades.filter(t => t.fromUser === currentUser || t.toUser === currentUser);
+  if (myTrades.length === 0) {
+    html += `<p>Você não possui trocas ainda.</p>`;
+  } else {
+    for (const trade of myTrades) {
+      const book = books.find(b => b.id === trade.bookId);
+      const from = users.find(u => u.username === trade.fromUser);
+      const to = users.find(u => u.username === trade.toUser);
+      html += `
+        <div class="trade-card">
+          <div><b>Livro:</b> ${book ? book.title : 'Removido'}</div>
+          <div><b>De:</b> ${from ? from.fullName : trade.fromUser}</div>
+          <div><b>Para:</b> ${to ? to.fullName : trade.toUser}</div>
+          <div class="status ${trade.status}">Status: ${trade.status}</div>
+          ${trade.status === 'pending' && trade.toUser === currentUser ? `
+            <button onclick="acceptTrade('${trade.id}')">Aceitar</button>
+            <button onclick="rejectTrade('${trade.id}')">Rejeitar</button>
+          ` : ''}
+        </div>
+      `;
+    }
+  }
+  html += `</div>`;
+  sections.trades.innerHTML = html;
+}
+
+// --- Propor Troca ---
+
+window.proposeTrade = function(bookId) {
+  const books = Storage.getBooks();
+  const book = books.find(b => b.id === bookId);
+  if (!book) return;
+  const trades = Storage.getTrades();
+  const currentUser = Storage.getCurrentUser();
+  if (book.owner === currentUser) {
+    alert('Você não pode propor troca para seu próprio livro.');
     return;
   }
-  connectToRoom(roomName);
+  // Verifica se já existe troca pendente para este livro e usuário
+  if (trades.some(t => t.bookId === bookId && t.fromUser === currentUser && t.status === 'pending')) {
+    alert('Você já propôs uma troca para este livro.');
+    return;
+  }
+  trades.push(new Trade(generateId('trade'), bookId, currentUser, book.owner));
+  Storage.saveTrades(trades);
+  alert('Troca proposta! Aguarde a resposta do dono do livro.');
+  renderTrades();
+  showSection('trades');
 };
 
-cancelRoomBtn.onclick = () => {
-  resetApp();
+// --- Aceitar/Rejeitar Troca ---
+
+window.acceptTrade = function(tradeId) {
+  const trades = Storage.getTrades();
+  const trade = trades.find(t => t.id === tradeId);
+  if (!trade || trade.status !== 'pending') return;
+  trade.status = 'accepted';
+  Storage.saveTrades(trades);
+  alert('Troca aceita!');
+  renderTrades();
 };
 
-function connectToRoom(roomName) {
-  if (ws) ws.close();
-  ws = new WebSocket('ws://localhost:3001');
-  ws.onopen = () => {
-    ws.send(JSON.stringify({ type: 'join', room: roomName }));
-  };
-  ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.type === 'joined') {
-      currentRoom = roomName;
-      isInitiator = msg.users === 1;
-      showStep(chatStep);
-      chatStatus.textContent = 'Aguardando outro participante...';
-      setupWebRTC();
-    } else if (msg.type === 'peer-joined') {
-      chatStatus.textContent = 'Conectando...';
-      if (isInitiator && peer) createOffer();
-    } else if (msg.type === 'full') {
-      showError(roomError, 'Sala cheia. Escolha outro nome.');
-      ws.close();
-    } else if (msg.type === 'error') {
-      showError(roomError, msg.message || 'Erro desconhecido.');
-      ws.close();
-    } else if (msg.type === 'signal') {
-      if (peer) handleSignal(msg.data);
-    } else if (msg.type === 'peer-left') {
-      chatStatus.textContent = 'O outro participante saiu. Aguardando reconexão...';
-      if (peer) { peer.close(); peer = null; }
-      // Permitir reconexão automática
-    }
-  };
-  ws.onerror = () => {
-    showError(roomError, 'Erro de conexão com o servidor.');
-    ws.close();
-  };
-  ws.onclose = () => {
-    // Se fechar inesperadamente durante o chat, tentar reconectar
-    if (currentRoom && chatStep.classList.contains('active')) {
-      chatStatus.textContent = 'Reconectando...';
-      reconnectTimeout = setTimeout(() => connectToRoom(currentRoom), 2000);
-    }
-  };
-}
+window.rejectTrade = function(tradeId) {
+  const trades = Storage.getTrades();
+  const trade = trades.find(t => t.id === tradeId);
+  if (!trade || trade.status !== 'pending') return;
+  trade.status = 'rejected';
+  Storage.saveTrades(trades);
+  alert('Troca rejeitada.');
+  renderTrades();
+};
 
-// --- WebRTC ---
-function setupWebRTC() {
-  if (peer) { peer.close(); peer = null; }
-  peer = new RTCPeerConnection({
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' }
-    ]
-  });
-  // Adiciona tracks locais
-  localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+// --- Inicialização ---
 
-  // Recebe tracks remotas
-  peer.ontrack = (event) => {
-    if (!remoteStream) {
-      remoteStream = new MediaStream();
-      remoteVideo.srcObject = remoteStream;
-    }
-    event.streams[0].getTracks().forEach(track => {
-      if (!remoteStream.getTracks().includes(track)) {
-        remoteStream.addTrack(track);
-      }
-    });
-  };
-
-  // ICE candidates
-  peer.onicecandidate = (event) => {
-    if (event.candidate && ws && ws.readyState === 1) {
-      ws.send(JSON.stringify({ type: 'signal', data: { candidate: event.candidate } }));
-    }
-  };
-
-  // Conexão estabelecida
-  peer.onconnectionstatechange = () => {
-    if (peer.connectionState === 'connected') {
-      chatStatus.textContent = 'Conectado!';
-    } else if (peer.connectionState === 'disconnected' || peer.connectionState === 'failed') {
-      chatStatus.textContent = 'Conexão perdida. Tentando reconectar...';
-    }
-  };
-}
-
-async function createOffer() {
-  if (!peer) return;
-  const offer = await peer.createOffer();
-  await peer.setLocalDescription(offer);
-  ws.send(JSON.stringify({ type: 'signal', data: { sdp: peer.localDescription } }));
-}
-
-async function handleSignal(signal) {
-  if (!peer) return;
-  if (signal.sdp) {
-    if (signal.sdp.type === 'offer') {
-      await peer.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-      const answer = await peer.createAnswer();
-      await peer.setLocalDescription(answer);
-      ws.send(JSON.stringify({ type: 'signal', data: { sdp: peer.localDescription } }));
-    } else if (signal.sdp.type === 'answer') {
-      await peer.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-    }
-  } else if (signal.candidate) {
-    try {
-      await peer.addIceCandidate(new RTCIceCandidate(signal.candidate));
-    } catch (e) {
-      // Ignora erros de ICE
-    }
-  }
-}
-
-// --- Sair da sala ---
-leaveBtn.onclick = () => {
-  if (ws && ws.readyState === 1) {
-    ws.send(JSON.stringify({ type: 'leave' }));
-    ws.close();
-  }
-  resetApp();
-}; 
+// Exibe livros ao carregar
+renderBooks();
+showSection('books'); 
