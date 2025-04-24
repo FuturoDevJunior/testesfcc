@@ -56,11 +56,11 @@ module.exports = function (app) {
   // POST /api/books - Adiciona livro
   app.post('/api/books', async (req, res) => {
     const { title } = req.body;
-    if (!title) return res.send('missing required field title');
+    if (!title) return res.status(200).send('missing required field title');
     try {
       const book = new Book({ title });
       await book.save();
-      res.json({ _id: book._id, title: book.title });
+      res.json({ _id: book._id, title: book.title, commentcount: book.commentcount });
     } catch (err) {
       res.status(500).send('error saving book');
     }
@@ -69,32 +69,32 @@ module.exports = function (app) {
   // GET /api/books - Lista todos os livros
   app.get('/api/books', async (req, res) => {
     const books = await Book.find({}, 'title comments');
-    res.json(books.map(b => ({ _id: b._id, title: b.title, commentcount: b.comments.length })));
+    res.json(books.map(b => ({ _id: b._id, title: b.title, commentcount: b.commentcount })));
   });
 
   // GET /api/books/:id - Detalha um livro
   app.get('/api/books/:id', async (req, res) => {
     try {
       const book = await Book.findById(req.params.id);
-      if (!book) return res.send('no book exists');
+      if (!book) return res.status(200).send('no book exists');
       res.json({ _id: book._id, title: book.title, comments: book.comments });
     } catch {
-      res.send('no book exists');
+      res.status(200).send('no book exists');
     }
   });
 
   // POST /api/books/:id - Adiciona comentário
   app.post('/api/books/:id', async (req, res) => {
     const { comment } = req.body;
-    if (!comment) return res.send('missing required field comment');
+    if (!comment) return res.status(200).send('missing required field comment');
     try {
       const book = await Book.findById(req.params.id);
-      if (!book) return res.send('no book exists');
+      if (!book) return res.status(200).send('no book exists');
       book.comments.push(comment);
       await book.save();
       res.json({ _id: book._id, title: book.title, comments: book.comments });
     } catch {
-      res.send('no book exists');
+      res.status(200).send('no book exists');
     }
   });
 
@@ -102,17 +102,21 @@ module.exports = function (app) {
   app.delete('/api/books/:id', async (req, res) => {
     try {
       const book = await Book.findByIdAndDelete(req.params.id);
-      if (!book) return res.send('no book exists');
+      if (!book) return res.status(200).send('no book exists');
       res.send('delete successful');
     } catch {
-      res.send('no book exists');
+      res.status(200).send('no book exists');
     }
   });
 
   // DELETE /api/books - Remove todos os livros
   app.delete('/api/books', async (req, res) => {
-    await Book.deleteMany({});
-    res.send('complete delete successful');
+    try {
+      await Book.deleteMany({});
+      res.send('complete delete successful');
+    } catch {
+      res.status(500).send('error deleting books');
+    }
   });
 
 };
