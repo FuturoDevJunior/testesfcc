@@ -3,9 +3,23 @@
 const expect = require('chai').expect;
 const ConvertHandler = require('../controllers/convertHandler.js');
 const { randomUUID } = require('crypto');
+const mongoose = require('mongoose');
 
 // In-memory store for issues by project
 const issuesDB = {};
+
+const BookSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  comments: { type: [String], default: [] }
+});
+BookSchema.virtual('commentcount').get(function() {
+  return this.comments.length;
+});
+BookSchema.set('toJSON', { virtuals: true });
+const Book = mongoose.model('Book', BookSchema);
+
+// Conexão MongoDB
+mongoose.connect(process.env.DB, { useNewUrlParser: true, useUnifiedTopology: true });
 
 module.exports = function (app) {
   
@@ -38,85 +52,67 @@ module.exports = function (app) {
     });
   });
 
-  // === ISSUE TRACKER ===
-  // Helper: get issues array for a project
-  function getProjectIssues(project) {
-    if (!issuesDB[project]) issuesDB[project] = [];
-    return issuesDB[project];
-  }
-
-  // POST: Create issue
-  app.post('/api/issues/:project', (req, res) => {
-    const project = req.params.project;
-    const { issue_title, issue_text, created_by, assigned_to = '', status_text = '' } = req.body;
-    if (!issue_title || !issue_text || !created_by) {
-      return res.json({ error: 'required field(s) missing' });
+  // === PERSONAL LIBRARY ===
+  // POST /api/books - Adiciona livro
+  app.post('/api/books', async (req, res) => {
+    const { title } = req.body;
+    if (!title) return res.send('missing required field title');
+    try {
+      const book = new Book({ title });
+      await book.save();
+      res.json({ _id: book._id, title: book.title });
+    } catch (err) {
+      res.status(500).send('error saving book');
     }
-    const now = new Date();
-    const issue = {
-      issue_title,
-      issue_text,
-      created_by,
-      assigned_to,
-      status_text,
-      created_on: now,
-      updated_on: now,
-      open: true,
-      _id: randomUUID(),
-    };
-    getProjectIssues(project).push(issue);
-    res.json(issue);
   });
 
-  // GET: List issues (with optional filters)
-  app.get('/api/issues/:project', (req, res) => {
-    const project = req.params.project;
-    let issues = getProjectIssues(project);
-    // Apply filters from query params
-    const filters = req.query;
-    if (Object.keys(filters).length > 0) {
-      issues = issues.filter(issue => {
-        return Object.entries(filters).every(([key, value]) => {
-          if (key === 'open') return issue.open === (value === 'true');
-          return issue[key] == value;
-        });
-      });
-    }
-    res.json(issues);
+  // GET /api/books - Lista todos os livros
+  app.get('/api/books', async (req, res) => {
+    const books = await Book.find({}, 'title comments');
+    res.json(books.map(b => ({ _id: b._id, title: b.title, commentcount: b.comments.length })));
   });
 
-  // PUT: Update issue
-  app.put('/api/issues/:project', (req, res) => {
-    const project = req.params.project;
-    const { _id, ...fields } = req.body;
-    if (!_id) return res.json({ error: 'missing _id' });
-    if (Object.keys(fields).length === 0 || Object.values(fields).every(v => v === '' || v === undefined)) {
-      return res.json({ error: 'no update field(s) sent', _id });
+  // GET /api/books/:id - Detalha um livro
+  app.get('/api/books/:id', async (req, res) => {
+    try {
+      const book = await Book.findById(req.params.id);
+      if (!book) return res.send('no book exists');
+      res.json({ _id: book._id, title: book.title, comments: book.comments });
+    } catch {
+      res.send('no book exists');
     }
-    const issues = getProjectIssues(project);
-    const issue = issues.find(i => i._id === _id);
-    if (!issue) return res.json({ error: 'could not update', _id });
-    let updated = false;
-    for (const key of ['issue_title','issue_text','created_by','assigned_to','status_text','open']) {
-      if (fields[key] !== undefined && fields[key] !== '') {
-        issue[key] = key === 'open' ? fields[key] === 'false' ? false : true : fields[key];
-        updated = true;
-      }
-    }
-    if (updated) issue.updated_on = new Date();
-    res.json({ result: 'successfully updated', _id });
   });
 
-  // DELETE: Remove issue
-  app.delete('/api/issues/:project', (req, res) => {
-    const project = req.params.project;
-    const { _id } = req.body;
-    if (!_id) return res.json({ error: 'missing _id' });
-    const issues = getProjectIssues(project);
-    const idx = issues.findIndex(i => i._id === _id);
-    if (idx === -1) return res.json({ error: 'could not delete', _id });
-    issues.splice(idx, 1);
-    res.json({ result: 'successfully deleted', _id });
+  // POST /api/books/:id - Adiciona comentário
+  app.post('/api/books/:id', async (req, res) => {
+    const { comment } = req.body;
+    if (!comment) return res.send('missing required field comment');
+    try {
+      const book = await Book.findById(req.params.id);
+      if (!book) return res.send('no book exists');
+      book.comments.push(comment);
+      await book.save();
+      res.json({ _id: book._id, title: book.title, comments: book.comments });
+    } catch {
+      res.send('no book exists');
+    }
+  });
+
+  // DELETE /api/books/:id - Remove um livro
+  app.delete('/api/books/:id', async (req, res) => {
+    try {
+      const book = await Book.findByIdAndDelete(req.params.id);
+      if (!book) return res.send('no book exists');
+      res.send('delete successful');
+    } catch {
+      res.send('no book exists');
+    }
+  });
+
+  // DELETE /api/books - Remove todos os livros
+  app.delete('/api/books', async (req, res) => {
+    await Book.deleteMany({});
+    res.send('complete delete successful');
   });
 
 };
