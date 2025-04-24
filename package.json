@@ -1,13 +1,25 @@
 {
-  "name": "image-search-abstraction-layer",
+  "name": "freec",
   "version": "1.0.0",
-  "description": "freeCodeCamp Image Search Abstraction Layer",
-  "main": "server.js",
+  "description": "",
+  "main": "script.js",
   "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FuturoDevJunior/frecode.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/FuturoDevJunior/frecode/issues"
+  },
+  "homepage": "https://github.com/FuturoDevJunior/frecode#readme",
   "dependencies": {
-    "express": "^4.18.2",
-    "node-fetch": "^2.6.7"
+    "ws": "^8.18.1"
   }
-} 
+}

@@ -1,52 +1,81 @@
-const express = require('express');
-const fetch = require('node-fetch');
-const app = express();
-const PORT = process.env.PORT || 3000;
+// server.js
+// Backend de sinalização para Video Chat P2P (freeCodeCamp)
+// Node.js + ws
 
-// Configuração da Unsplash API
-const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY || 'DEFINA_SUA_CHAVE_AQUI';
-const UNSPLASH_URL = 'https://api.unsplash.com/search/photos';
+const WebSocket = require('ws');
+const server = new WebSocket.Server({ port: 3001 });
 
-// Persistência simples em memória
-let recentSearches = [];
-const RECENT_LIMIT = 10;
+// Estrutura de salas: { [roomName]: Set<ws> }
+const rooms = {};
 
-// Função utilitária para registrar pesquisas
-function addRecentSearch(term) {
-  const entry = { term, when: new Date().toISOString() };
-  recentSearches.unshift(entry);
-  if (recentSearches.length > RECENT_LIMIT) recentSearches = recentSearches.slice(0, RECENT_LIMIT);
+function send(ws, type, payload) {
+  ws.send(JSON.stringify({ type, ...payload }));
 }
 
-// Endpoint de busca de imagens
-app.get('/api/imagesearch/:query', async (req, res) => {
-  const { query } = req.params;
-  const page = parseInt(req.query.page, 10) || 1;
-  addRecentSearch(query);
+server.on('connection', (ws) => {
+  ws.room = null;
+  ws.isAlive = true;
 
-  try {
-    const url = `${UNSPLASH_URL}?query=${encodeURIComponent(query)}&page=${page}&per_page=10&client_id=${UNSPLASH_ACCESS_KEY}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    if (!data.results) return res.json([]);
-    const results = data.results.map(img => ({
-      url: img.urls?.regular,
-      snippet: img.alt_description || img.description || '',
-      thumbnail: img.urls?.thumb,
-      context: img.links?.html
-    }));
-    res.json(results);
-  } catch (err) {
-    res.status(500).json({ error: 'Erro ao buscar imagens.' });
-  }
+  ws.on('pong', () => { ws.isAlive = true; });
+
+  ws.on('message', (msg) => {
+    let data;
+    try {
+      data = JSON.parse(msg);
+    } catch (e) {
+      send(ws, 'error', { message: 'Mensagem inválida.' });
+      return;
+    }
+    const { type, room } = data;
+    if (type === 'join') {
+      if (!room || typeof room !== 'string' || !room.trim()) {
+        send(ws, 'error', { message: 'Nome de sala inválido.' });
+        return;
+      }
+      if (!rooms[room]) rooms[room] = new Set();
+      if (rooms[room].size >= 2) {
+        send(ws, 'full', { message: 'Sala cheia.' });
+        return;
+      }
+      rooms[room].add(ws);
+      ws.room = room;
+      send(ws, 'joined', { users: rooms[room].size });
+      // Notifica o outro usuário, se houver
+      rooms[room].forEach(client => {
+        if (client !== ws) send(client, 'peer-joined', {});
+      });
+    } else if (type === 'signal') {
+      // Encaminha sinalização para o outro peer
+      if (!ws.room || !rooms[ws.room]) return;
+      rooms[ws.room].forEach(client => {
+        if (client !== ws) send(client, 'signal', { data: data.data });
+      });
+    } else if (type === 'leave') {
+      if (ws.room && rooms[ws.room]) {
+        rooms[ws.room].delete(ws);
+        if (rooms[ws.room].size === 0) delete rooms[ws.room];
+        else rooms[ws.room].forEach(client => send(client, 'peer-left', {}));
+        ws.room = null;
+      }
+    }
+  });
+
+  ws.on('close', () => {
+    if (ws.room && rooms[ws.room]) {
+      rooms[ws.room].delete(ws);
+      if (rooms[ws.room].size === 0) delete rooms[ws.room];
+      else rooms[ws.room].forEach(client => send(client, 'peer-left', {}));
+    }
+  });
 });
 
-// Endpoint de pesquisas recentes
-app.get('/api/latest/imagesearch/', (req, res) => {
-  res.json(recentSearches);
-});
+// Heartbeat para detectar conexões mortas
+typeof setInterval !== 'undefined' && setInterval(() => {
+  server.clients.forEach((ws) => {
+    if (!ws.isAlive) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
 
-// Inicialização do servidor
-app.listen(PORT, () => {
-  console.log(`Servidor rodando em http://localhost:${PORT}`);
-}); 
+console.log('WebSocket signaling server running on ws://localhost:3001'); 

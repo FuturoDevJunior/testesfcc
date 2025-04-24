@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P2P Video Chat</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="videochat-container">
+    <h1>P2P Video Chat</h1>
+    <div id="permission-step" class="step active">
+      <p>Precisamos de acesso à sua câmera e microfone para iniciar.</p>
+      <button id="grant-media-btn">Permitir acesso</button>
+      <div id="permission-error" class="error-message"></div>
+    </div>
+    <div id="room-step" class="step">
+      <label for="room-input">Digite o nome da sala:</label>
+      <input id="room-input" type="text" maxlength="32" autocomplete="off" placeholder="Nome da sala" />
+      <div class="room-actions">
+        <button id="join-room-btn">Entrar</button>
+        <button id="cancel-room-btn">Cancelar</button>
+      </div>
+      <div id="room-error" class="error-message"></div>
+    </div>
+    <div id="chat-step" class="step">
+      <div class="videos">
+        <video id="local-video" autoplay playsinline muted></video>
+        <video id="remote-video" autoplay playsinline></video>
+      </div>
+      <div id="chat-status" class="status-message"></div>
+      <button id="leave-btn">Sair da sala</button>
+    </div>
+    <footer>
+      <p>Desenvolvido por <strong>Seu Nome</strong> | Desafio freeCodeCamp</p>
+    </footer>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html> 
